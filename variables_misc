@@ -1,1 +1,38 @@
+Variable Precedency
+
+variable "myip" {
+  default     = "35.77.142.120/32"
+}
+
+1. CLI
+
+terraform plan -var="myip=90.20.5.2/32" 
+terraform plan (it takes 90 series)
+
+2. terraform.tfvars
+
+vi terraform.tfvars
+myip = "70.3.4.0/32"
+esc:wq!
+terraform plan (it takes 70 series)
+
+3. Environment Variable
+
+export TF_VAR_myip=60.20.4.5/32
+echo $TF_VAR_myip
+terraform plan (it takes 60 series)
+
+4. Default (35 series)
+
+#### Parsing Variable ####
+
+provider "aws" {
+   region     = "eu-central-1"
+   access_key = "AKIA"
+   secret_key = "S1Y"
+}
+Terraform init
+
+1. Variable = String
+
 
