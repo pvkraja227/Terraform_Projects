@@ -1,0 +1,297 @@
+mkdir terraform
+cd terraform
+
+mkdir files
+cd files
+vi apache.sh / copy
+
+# Source Code
+
+#!/bin/bash
+yum install httpd -y
+service httpd start
+chkconfig httpd on
+echo "<h2> DevOps Terraform </h2>" > /var/www/html/index.html
+
+esc:wq!
+
+cd ..
+
+vi main.tf
+
+provider "aws" {
+  access_key = "AK"
+  secret_key = "S"
+  region = "ap-southeast-2"
+}
+
+# Create VPC
+
+resource "aws_vpc" "main" {
+  cidr_block       = var.vpc_cidr
+  instance_tenancy = "default"
+
+  tags = {
+    Name        = "main-terraform-${terraform.workspace}"
+    CostCenter  = "KHPAP-09876"
+    Banglore    = "Banglore"
+    Client      = "Jpmorgan"
+    Environment = terraform.workspace
+    AccountId   = data.aws_caller_identity.current.account_id
+  }
+}
+
+# create public subnets
+
+resource "aws_subnet" "public" {
+  count      = local.num_of_subnets
+  vpc_id     = aws_vpc.main.id
+  cidr_block = cidrsubnet(var.vpc_cidr,8,count.index)
+  map_public_ip_on_launch = true
+  availability_zone = data.aws_availability_zones.available.names[count.index]
+  tags = {
+    Name = "public-subnet-${count.index + 1}"
+  }
+}
+
+# create private subnets
+
+resource "aws_subnet" "private" {
+  count      = local.num_of_subnets
+  vpc_id     = aws_vpc.main.id
+  cidr_block = cidrsubnet(var.vpc_cidr,8,count.index + local.num_of_subnets)
+
+  tags = {
+    Name = "private-subnet-${count.index + 1}"
+  }
+}
+
+# create internet gateway for public subnet
+
+resource "aws_internet_gateway" "gw" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "javahome-ig-${local.ws}"
+  }
+}
+
+# create route table for public subnets
+
+resource "aws_route_table" "pr" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.gw.id
+  }
+
+  # route {
+  #   ipv6_cidr_block        = "::/0"
+  #   egress_only_gateway_id = aws_egress_only_internet_gateway.foo.id
+  # }
+
+  tags = {
+    Name = "public-rt-${local.ws}"
+  }
+}
+
+# associate route table with public subnets
+
+resource "aws_route_table_association" "pub_rt_asso" {
+  count = local.num_of_subnets
+  subnet_id      = aws_subnet.public.*.id[count.index]
+  route_table_id = aws_route_table.pr.id
+}
+
+# Allocate EIP for NAT gateway
+
+resource "aws_eip" "nat" {
+  vpc      = true
+}
+
+# Create Nat Gateway for private subnets
+
+resource "aws_nat_gateway" "ngw" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public.*.id[0]
+}
+
+# create route table for private subnets
+
+resource "aws_route_table" "pri" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.ngw.id
+  }
+
+  tags = {
+    Name = "private-rt-${local.ws}"
+  }
+}
+
+# associate private subnets with private route tables
+
+resource "aws_route_table_association" "priv_rt_asso" {
+  count = local.num_of_subnets
+  subnet_id      = aws_subnet.private.*.id[count.index]
+  route_table_id = aws_route_table.pri.id
+}
+
+# Collecting data/resources already present in AWS
+
+data "aws_caller_identity" "current" {}
+
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+# Defining variables
+
+variable "vpc_cidr" {
+  default     = "10.0.0.0/16"
+  description = "choose cidr for your vpc"
+  type        = string
+}
+
+variable "web_ami" {
+  default     = "ami-XXXXXXX"
+  description = "choose ami for web app"
+  type        = string
+}
+
+# Printing VPC, ACC ID, AZ Names
+
+output "vpc_id" {
+  value = aws_vpc.main.id
+}
+
+output "account_id" {
+  value = data.aws_caller_identity.current.account_id
+}
+
+output "az_names" {
+  value = data.aws_availability_zones.available.names
+}
+
+# using a variable in this file/knowing default subnets in Sydney region = 3
+
+locals {
+  num_of_subnets = length(data.aws_availability_zones.available.names)
+  ws = terraform.workspace
+}
+
+# Creating EC2 and attaching Security Group (user date is in files/apache - below)
+
+resource "aws_instance" "web" {
+  ami                    = var.web_ami
+  instance_type          = "t2.micro"
+  subnet_id              = aws_subnet.public.*.id[0]
+  key_name               = "krishna227227"
+  vpc_security_group_ids = [aws_security_group.web_sg.id]
+  user_data              = file("./files/apache.sh")
+#  iam_instance_profile   = aws_iam_instance_profile.web_s3_profile.name
+  tags = {
+    Name = "HelloWorld-${local.ws}"
+  }
+}
+
+# create security group for web servers
+
+resource "aws_security_group" "web_sg" {
+  name        = "web_sg"
+  description = "Allow TLS inbound traffic"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description = "http for web servers"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "ssh for web servers"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "web_sg_${local.ws}"
+  }
+}
+
+# Creating LB (ALB needs targets)
+
+resource "aws_lb_target_group" "myapp_tg" {
+  name     = "myapp-tg"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.main.id
+  health_check {
+    protocol = "HTTP"
+    path = "/index.html"
+    port = 80
+  }
+}
+
+# add targets to target group
+
+resource "aws_lb_target_group_attachment" "test" {
+  target_group_arn = aws_lb_target_group.myapp_tg.arn
+  target_id        = aws_instance.web.id
+  port             = 80
+}
+
+# Application load balancer
+
+resource "aws_lb" "myapp_alb" {
+  name               = "myapp-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.web_sg.id]
+  subnets            = aws_subnet.public.*.id
+
+  tags = {
+    Environment = terraform.workspace
+  }
+}
+
+# add listener to ALB
+
+resource "aws_lb_listener" "webapp" {
+  load_balancer_arn = aws_lb.myapp_alb.arn
+  port              = "80"
+  protocol          = "HTTP"
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.myapp_tg.arn
+  }
+}
+
+terraform init (Provider, communicating with AWS thru plugin)
+
+terraform validate (success)
+
+terraform plan (simulation, how many are going to be added)
+
+terraform apply --auto-approve
+
+terraform state list (no.of resources added)
+
+terraform output
+
+chrome: dns link in ec2/instance/loadbalanncer
+
+terraform destroy --auto-approve
