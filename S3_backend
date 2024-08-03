@@ -1,1 +1,69 @@
+vi provider.tf
 
+provider "aws" {
+  access_key = "AKI"
+  secret_key = "V1"
+  region = "ap-southeast-2"
+}
+
+terraform init
+
+### create S3/bucket (VPC and S3 bucket in same region)
+
+vi main.tf
+
+terraform {
+  backend "s3" {
+    bucket = "pvkraja"
+    key    = "terraform.tfstate"
+    region = "ap-southeast-2"
+  }
+}
+resource "aws_vpc" "main" {
+  cidr_block       = "30.20.0.0/16"
+  instance_tenancy = "default"
+
+  tags = {
+    Name        = "main"
+    Envi        = "Dev"
+    Location    = "HYD"
+  }
+}
+
+# Print VPC CIDR
+
+output "vpc_cidr" {
+  value = "${aws_vpc.main.cidr_block}"
+}
+esc:wq!
+
+terraform init -backend-config="access_key=AKIA" -backend-config="secret_key=Rbbm"
+
+(terraform.tfstate is stored in S3)
+
+### Creating workspaces
+
+terraform workspace (new/list/show/delete/select)
+terraform workspace list (default)
+terraform workspace new dev (dev, default)
+terraform workspace show (dev)
+terraform workspace select dev
+vi vpc.tf
+
+resource "aws_vpc" "main" {
+  cidr_block       = "50.30.0.0/16"
+  instance_tenancy = "default"
+
+  tags = {
+    Name           = "dev"
+  }
+}
+terraform apply --auto-approve (creted VPC and s3/dev) 
+
+terraform workspace select dev
+terraform destroy --auto-approve (vpc destroyed in console)
+
+terraform workspace select default
+terraform workspace delete dev (deleted s3/dev)
+
+terraform workspace list (default)
