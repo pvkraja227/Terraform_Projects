@@ -48,6 +48,7 @@ terraform workspace list (default)
 terraform workspace new dev (dev, default)
 terraform workspace show (dev)
 terraform workspace select dev
+
 vi vpc.tf
 
 resource "aws_vpc" "main" {
