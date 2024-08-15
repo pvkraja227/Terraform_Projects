@@ -1,9 +1,11 @@
+Take EC2 and Install Terraform - 6 steps
+
 mkdir terraform
 cd terraform
 
 mkdir files
 cd files
-vi apache.sh / copy
+vi apache.sh / copy the below code
 
 # Source Code
 
